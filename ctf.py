@@ -100,7 +100,7 @@ class ctPLS(Mapping, metaclass=ABCMeta):
  
         return [X - self.Xs_mean[i] for (i, X) in enumerate(Xs)], Y - self.Y_mean
 
-    def fit(self, Xs, Y, tol=1e-11, max_iter=5000, verbose=0):
+    def fit(self, Xs, Y, tol=1e-10, max_iter=1000, verbose=0):
         """Fit coupled tPLS factors and regression coefficients."""
         oXs, oY = [X.copy() for X in Xs], Y
         Xs, Y = self.preprocess(Xs, Y)

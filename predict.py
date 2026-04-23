@@ -50,8 +50,7 @@ def run_coupled_tpls_classification(
     )
 
     model = LogisticRegressionCV(
-        # l1_ratios=np.linspace(0, 1, 11),
-        # Cs=11,
+        l1_ratios=[.1, .5, .7, .9, .95, .99, 1],
         solver="saga",
         use_legacy_attributes=False,
         n_jobs=-1,
