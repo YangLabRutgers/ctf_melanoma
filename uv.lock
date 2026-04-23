@@ -115,17 +115,6 @@ wheels = [
 ]
 
 [[package]]
-name = "cmtf-pls"
-version = "0.1.0"
-source = { git = "https://github.com/meyer-lab/cmtf-pls.git?rev=main#c5b41327ae5e7bda0549a9c32ed1b3a70cef49a1" }
-dependencies = [
-    { name = "numpy" },
-    { name = "pandas" },
-    { name = "scikit-learn" },
-    { name = "tensorly" },
-]
-
-[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -206,7 +195,6 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "anndata" },
-    { name = "cmtf-pls" },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "pandas" },
@@ -222,7 +210,6 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "anndata", specifier = ">=0.11.3" },
-    { name = "cmtf-pls", git = "https://github.com/meyer-lab/cmtf-pls.git?rev=main" },
     { name = "matplotlib", specifier = "~=3.10.1" },
     { name = "numpy", specifier = ">=2.2" },
     { name = "pandas", specifier = ">=2.0.0" },

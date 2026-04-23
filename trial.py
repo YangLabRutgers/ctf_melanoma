@@ -1,7 +1,7 @@
 from data_import import convert_anndata_to_pseudobulk, convert_pseudobulk_to_tensor
 import anndata
 import numpy as np
-from cmtf_pls.cmtf import ctPLS
+from predict import run_coupled_tpls_classification
 
 def main():
 
@@ -54,9 +54,10 @@ def main():
     y_raw = labels["lesion_response"]
     y = np.array([0 if v == "R" else 1 if v == "NR" else np.nan for v in y_raw], dtype=float)
     y = y.astype(int)
-    tpls = ctPLS(n_components=2)
-    tpls.fit(tensors, y)
-    
+
+    (tpls, lr_model), tpls_acc, tpls_proba = run_coupled_tpls_classification(
+        tensors, y, rank=2,return_proba=True
+    )
 
 
 
