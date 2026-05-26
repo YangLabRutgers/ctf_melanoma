@@ -28,11 +28,15 @@ def convert_anndata_to_pseudobulk(
     x_df = adata.to_df()
     group_cols = [sample_col, cell_type_col]
 
-    obs = adata.obs[[sample_col, cell_type_col, outcome_col]]
+    obs = adata.obs.loc[:, [sample_col, cell_type_col, outcome_col]].copy()
     sample_order = np.unique(obs[sample_col].to_numpy())
     cell_type_order = np.unique(obs[cell_type_col].to_numpy())
-    obs[sample_col] = pd.Categorical(obs[sample_col], categories=sample_order, ordered=True)
-    obs[cell_type_col] = pd.Categorical(obs[cell_type_col], categories=cell_type_order, ordered=True)
+    obs.loc[:, sample_col] = pd.Categorical(
+        obs[sample_col], categories=sample_order, ordered=True
+    )
+    obs.loc[:, cell_type_col] = pd.Categorical(
+        obs[cell_type_col], categories=cell_type_order, ordered=True
+    )
 
     pseudobulk = x_df.groupby([obs[col] for col in group_cols], observed=False, sort=False).mean()
     pseudobulk.index = pseudobulk.index.set_names(group_cols)

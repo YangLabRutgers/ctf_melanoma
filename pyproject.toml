@@ -16,7 +16,6 @@ dependencies = [
     "tensorly-viz>=0.1.7",
     "scanpy>=1.12.0",
     "tensorpack @ git+https://github.com/meyer-lab/tensorpack.git@main",
-    "cmtf-pls @ git+https://github.com/meyer-lab/cmtf-pls.git@main"
 ]
 
 readme = "README.md"
