@@ -103,42 +103,47 @@ def main():
     print(np.unique(X_atac.obs['patient_id']))
     print(np.unique(X_rna.obs['patient_id']))
 
-        # # Calculate pseudobulk datasets with perfectly aligned shapes
-    pseudobulk_atac_df = convert_anndata_to_pseudobulk(
-            adata=X_atac,
-            sample_col="joint_sample_id",
-            cell_type_col="reannotated_predicted_id",
-            outcome_col="lesion_response"
-        )
+    print(np.unique(X_atac.obs['joint_sample_id']))
+    print(np.unique(X_rna.obs['joint_sample_id']))
 
-    pseudobulk_rna_df = convert_anndata_to_pseudobulk(
-            adata=X_rna,
-            sample_col="joint_sample_id",
-            cell_type_col="cell_type",
-            outcome_col="lesion_response"
-        )
+    
 
-    tensor_atac, labels = convert_pseudobulk_to_tensor(
-            pseudobulk_df=pseudobulk_atac_df,
-            outcome_col="lesion_response",
-        )
-    print(labels["lesion_response"])
+    #     # # Calculate pseudobulk datasets with perfectly aligned shapes
+    # pseudobulk_atac_df = convert_anndata_to_pseudobulk(
+    #         adata=X_atac,
+    #         sample_col="joint_sample_id",
+    #         cell_type_col="reannotated_predicted_id",
+    #         outcome_col="lesion_response"
+    #     )
 
+    # pseudobulk_rna_df = convert_anndata_to_pseudobulk(
+    #         adata=X_rna,
+    #         sample_col="joint_sample_id",
+    #         cell_type_col="cell_type",
+    #         outcome_col="lesion_response"
+    #     )
 
-    tensor_rna, labels = convert_pseudobulk_to_tensor(
-        pseudobulk_df=pseudobulk_rna_df,
-        outcome_col="lesion_response",
-        )
-    print(labels["lesion_response"])
+    # tensor_atac, labels = convert_pseudobulk_to_tensor(
+    #         pseudobulk_df=pseudobulk_atac_df,
+    #         outcome_col="lesion_response",
+    #     )
+    # print(labels["lesion_response"])
 
 
-    y_raw = labels["lesion_response"]
-    y = np.array([0 if v == "R" else 1 if v == "NR" else np.nan for v in y_raw], dtype=float)
-    y = y.astype(int)
+    # tensor_rna, labels = convert_pseudobulk_to_tensor(
+    #     pseudobulk_df=pseudobulk_rna_df,
+    #     outcome_col="lesion_response",
+    #     )
+    # print(labels["lesion_response"])
 
-    (tpls, lr_model), tpls_acc, tpls_proba = run_coupled_tpls_classification(
-            [tensor_atac, tensor_rna], y, rank=2,return_proba=True
-        ) 
+
+    # y_raw = labels["lesion_response"]
+    # y = np.array([0 if v == "R" else 1 if v == "NR" else np.nan for v in y_raw], dtype=float)
+    # y = y.astype(int)
+
+    # (tpls, lr_model), tpls_acc, tpls_proba = run_coupled_tpls_classification(
+    #         [tensor_atac, tensor_rna], y, rank=2,return_proba=True
+    #     ) 
 
 
 
