@@ -91,12 +91,19 @@ def run_coupled_tpls_classification(
     else:
         acc = accuracy_score(labels, predicted)
 
+    # Fit model on the full data
     tpls.fit(tensors, labels)
     model.fit(tpls.transform(tensors), labels)
 
+    # --- EXTRACT R2X METRIC FROM THE FITTED TPLS OBJECT ---
+    r2x_val = getattr(tpls, "R2X", None)
+    if r2x_val is None:
+        r2x_val = getattr(tpls, "variance_explained_", 0.0)
+
+    # --- RETURN STATEMENTS UPDATED TO PASS OUT r2x_val ---
     if return_proba:
-        return (tpls, model), acc, predicted
+        return (tpls, model), acc, predicted, r2x_val
     elif return_components:
-        return (tpls, model), acc, components
+        return (tpls, model), acc, components, r2x_val
     else:
-        return (tpls, model), acc, predicted
+        return (tpls, model), acc, predicted, r2x_val
