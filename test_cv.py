@@ -1,7 +1,7 @@
 from data_import import convert_anndata_to_pseudobulk, convert_pseudobulk_to_tensor
 import anndata
 
-print("--- Starting our simple test ---")
+print("--- Testing ---")
 
 # Load just the RNA file to see if it works
 X_rna = anndata.read_h5ad("/mnt/yang_lab/ar3023/ctf_melanoma/data/scrna_non_tumor.h5ad")
@@ -52,7 +52,7 @@ X_atac_small = X_atac_small[X_atac_small.obs['reannotated_predicted_id'].isin(sh
 X_rna_small = X_rna_small[X_rna_small.obs['cell_type'].isin(shared_cell_types)].copy()
 
 print("Data filtering completed successfully.")
-# Convert our sliced and filtered matrices into pseudobulk profiles
+# Convert sliced and filtered matrices into pseudobulk profiles
 pseudobulk_atac_df = convert_anndata_to_pseudobulk(
     adata=X_atac_small,
     sample_col="joint_sample_id",
@@ -82,7 +82,7 @@ print(f"Pseudobulk tensor compilation complete.")
 print(f"ATAC tensor shape: {tensor_atac.shape} | RNA tensor shape: {tensor_rna.shape}")
 import numpy as np
 
-# Create the 0 and 1 classification labels for our 12 samples
+# Create the 0 and 1 classification labels for 12 samples
 y_raw = labels_rna["lesion_response"]
 y = np.array([0 if v == "R" else 1 for v in y_raw], dtype=int)
 
@@ -91,52 +91,16 @@ print("Labels match sequence:", y)
 cv_predictions = np.zeros(12)
 print("\n--- Starting Leave-One-Out Cross-Validation Loop ---")
 
-# We have 12 samples, so we loop from 0 to 11
-for test_index in range(12):
-    # 1. Identify which sample name is being left out for testing
-    left_out_sample = labels_rna['samples'][test_index]
-    
-    # 2. Split the targets (y) into 11 training samples and 1 test sample
-    y_train = np.delete(y, test_index)
-    y_test = y[test_index]
-    
-    # 3. Split the ATAC tensor into 11 training samples and 1 test sample
-    tensor_atac_train = np.delete(tensor_atac, test_index, axis=0)
-    tensor_atac_test = tensor_atac[test_index:test_index+1, :, :]
-    
-    # 4. Split the RNA tensor into 11 training samples and 1 test sample
-    tensor_rna_train = np.delete(tensor_rna, test_index, axis=0)
-    tensor_rna_test = tensor_rna[test_index:test_index+1, :, :]
-    
-    print(f"Fold {test_index+1}: Left out {left_out_sample} | Training set size: {tensor_rna_train.shape[0]}")
-    # --- Step 17: Run classification inside this validation fold ---
-    # We import the function dynamically here to ensure it is isolated
-    from predict import run_coupled_tpls_classification
-    
-    # We pass the 11 training samples into the TPLS function
-    # Let's use rank=2 just like your trial script did
-    (tpls, lr_model), train_acc, train_proba = run_coupled_tpls_classification(
-        [tensor_atac_train, tensor_rna_train], 
-        y_train, 
-        rank=2, 
-        return_proba=True
-    )
-    
-    print(f"       -> Successfully completed Fold {test_index+1} training! Train Accuracy: {train_acc:.2f}")
-    # Project the single left-out test sample into our trained model space
-    test_transformed = tpls.transform([tensor_atac_test, tensor_rna_test])
-    
-    # Predict whether this left-out sample is a 0 or 1
-    sample_pred = lr_model.predict(test_transformed)[0]
-    
-    # Save that prediction into our array
-    cv_predictions[test_index] = sample_pred
-    
-    print(f"       -> Test Result | True Label: {y_test} | Predicted: {int(sample_pred)}")
-# --- Calculate and print out the final cross-validation score ---
-from sklearn.metrics import accuracy_score
+# Call updated function directly on the whole dataset
+from predict import run_coupled_tpls_classification
 
-final_cv_accuracy = accuracy_score(y, cv_predictions)
-print("\n==============================================")
+models, final_cv_accuracy, cv_predictions = run_coupled_tpls_classification(
+    tensors=[tensor_atac, tensor_rna],
+    labels=y,
+    rank=2,
+    return_proba=False
+)
+
+print(f"\n==================================================")
 print(f"FINAL CROSS-VALIDATION ACCURACY: {final_cv_accuracy * 100:.2f}%")
-print("==============================================")
+print(f"==================================================")
