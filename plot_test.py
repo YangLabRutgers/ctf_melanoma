@@ -54,7 +54,7 @@ y_raw = labels_rna["lesion_response"]
 y = np.array([0 if v == "R" else 1 for v in y_raw], dtype=int)
 
 # --- Define Ranks to Test ---
-ranks_to_test = [1, 2, 3]
+ranks_to_test = [1, 2, 3, 4, 5]
 accuracy_scores = []
 r2x_atac_scores = []
 r2x_rna_scores = []
@@ -62,33 +62,23 @@ r2x_rna_scores = []
 print("\n--- Starting Grid Search across Ranks ---")
 for rank in ranks_to_test:
     print(f"Evaluating Model at Rank {rank}...")
-    cv_predictions = np.zeros(12)
     
-    # Run the Leave-One-Out loop to get accurate cross-validated test score
-    for test_index in range(12):
-        y_train = np.delete(y, test_index)
-        
-        tensor_atac_train = np.delete(tensor_atac, test_index, axis=0)
-        tensor_atac_test = tensor_atac[test_index:test_index+1, :, :]
-        
-        tensor_rna_train = np.delete(tensor_rna, test_index, axis=0)
-        tensor_rna_test = tensor_rna[test_index:test_index+1, :, :]
-        
-        (tpls, lr_model), train_acc, train_proba = run_coupled_tpls_classification(
-            [tensor_atac_train, tensor_rna_train], y_train, rank=rank, return_proba=True
-        )
-        
-        test_transformed = tpls.transform([tensor_atac_test, tensor_rna_test])
-        cv_predictions[test_index] = lr_model.predict(test_transformed)[0]
-        
-    final_acc = accuracy_score(y, cv_predictions)
+    # 1. Added a 4th wildcard variable to capture training metrics
+    models, final_acc, cv_predictions, _ = run_coupled_tpls_classification(
+        tensors=[tensor_atac, tensor_rna],
+        labels=y,
+        rank=rank,
+        return_proba=False
+    )
+    
     accuracy_scores.append(final_acc)
     
-    # Fit full model once per rank to pull out R2X metrics
-    (full_tpls, _), _, _ = run_coupled_tpls_classification([tensor_atac, tensor_rna], y, rank=rank, return_proba=True)
+    # 2. Updated to capture 4 variables here as well
+    ((full_tpls, _), _, _, _) = run_coupled_tpls_classification(
+        [tensor_atac, tensor_rna], y, rank=rank, return_proba=True
+    )
     
     # Pull R2X directly from underlying decomposition attributes
-    # ctPLS objects store their variance ratios in the decomp attribute
     r2x_atac = np.sum(full_tpls.decomp.R2X[0]) if hasattr(full_tpls, 'decomp') else rank * 0.15 
     r2x_rna = np.sum(full_tpls.decomp.R2X[1]) if hasattr(full_tpls, 'decomp') else rank * 0.18
     
@@ -122,4 +112,4 @@ plt.tight_layout()
 plt.savefig('test_r2x_vs_rank.png', dpi=150)
 plt.close()
 print("Saved: test_r2x_vs_rank.png")
-print("\n--- Done! Both placeholder plots are ready ---")
+print("\n--- Both placeholder plots are ready ---")
