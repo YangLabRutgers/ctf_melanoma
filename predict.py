@@ -67,6 +67,7 @@ def run_coupled_tpls_classification(
         solver="saga",
         max_iter=100000,
     )
+    
     for train_index, test_index in loo.split(labels):
         train_data = [tensor[train_index, :, :] for tensor in tensors]
         test_data = [tensor[test_index, :, :] for tensor in tensors]
