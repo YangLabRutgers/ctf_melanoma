@@ -94,9 +94,12 @@ def run_coupled_tpls_classification(
     tpls.fit(tensors, labels)
     model.fit(tpls.transform(tensors), labels)
 
+    # Calculate the R2X variance explained metric
+    r2x_val = float(np.mean(tpls.R2Xs))
+
     if return_proba:
-        return (tpls, model), acc, predicted
+        return (tpls, model), acc, predicted, r2x_val
     elif return_components:
-        return (tpls, model), acc, components
+        return (tpls, model), acc, components, r2x_val
     else:
-        return (tpls, model), acc, predicted
+        return (tpls, model), acc, predicted, r2x_val
