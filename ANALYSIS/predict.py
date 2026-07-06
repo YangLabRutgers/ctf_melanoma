@@ -2,10 +2,10 @@ import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegressionCV, LogisticRegression
 from sklearn.metrics import accuracy_score
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import LeaveOneOut
 from ctf import ctPLS
 
-skf = StratifiedKFold(n_splits=5)
+loo = LeaveOneOut()
 
 
 
@@ -54,7 +54,7 @@ def run_coupled_tpls_classification(
         solver="saga",
         use_legacy_attributes=False,
         n_jobs=-1,
-        cv=skf,
+        cv=loo,
         max_iter=100000,
         scoring=scoring,
     )
@@ -67,7 +67,7 @@ def run_coupled_tpls_classification(
         solver="saga",
         max_iter=100000,
     )
-    for train_index, test_index in skf.split(labels, labels):
+    for train_index, test_index in loo.split(labels, labels):
         train_data = [tensor[train_index, :, :] for tensor in tensors]
         test_data = [tensor[test_index, :, :] for tensor in tensors]
         train_labels = labels[train_index]

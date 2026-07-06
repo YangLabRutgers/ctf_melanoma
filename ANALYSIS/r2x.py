@@ -89,7 +89,7 @@ def main():
 
     # 3. COMBINE PLOTS INTO ONE PYTHON FILE (MULTI-PANEL FIGURE)
     print("\n--- Saving Combined Performance Plots ---")
-    os.makedirs("../Plots", exist_ok=True)
+    os.makedirs("Plots", exist_ok=True)
 
     # Creating a single 1 row, 2 column figure layout
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
@@ -111,7 +111,7 @@ def main():
     ax2.grid(True, linestyle='--', alpha=0.6)
 
     plt.tight_layout()
-    plt.savefig("../Plots/model_evaluation_metrics.png", dpi=300)
+    plt.savefig("Plots/model_evaluation_metrics.png", dpi=300)
     plt.close()
 
     print("Pipeline complete! Unified visualization saved to 'Plots/model_evaluation_metrics.png'.")
