@@ -69,33 +69,22 @@ def main():
     accuracies = []
     r2x_scores = []
 
-    # Initialize the Scikit-Learn algorithm Andrew wanted
-    loo = LeaveOneOut()
-
     for rank in ranks:
-        print(f"\n--- Running Leave-One-Out CV using sklearn (Rank {rank}) ---")
-        cv_predictions = np.zeros(len(y))
+        print(f"\n--- Running Cross-Validation Evaluation (Rank {rank}) ---")
         
-        # Pull R2X metric value for the full dataset at this rank
-        _, _, _, r2x_val = run_coupled_tpls_classification(tensors=tensors, labels=y, rank=rank, return_proba=False)
-        r2x_scores.append(r2x_val)
-
-        # Loop through splits generated cleanly by scikit-learn
-        for train_index, test_index in loo.split(y):
-            y_train, y_test = y[train_index], y[test_index]
-            
-            # Slice tensors using sklearn's indices instead of manual tracking
-            train_tensors = [t[train_index, :, :] for t in tensors]
-            test_tensors = [t[test_index, :, :] for t in tensors]
-            
-            # Train model
-            (tpls, lr_model), _, _, _ = run_coupled_tpls_classification(train_tensors, y_train, rank=rank, return_proba=False)
-            
-            test_transformed = tpls.transform(test_tensors)
-            cv_predictions[test_index] = lr_model.predict(test_transformed)[0]
-
-        final_acc = accuracy_score(y, cv_predictions)
+        # Call the classification function directly on the whole dataset
+        # The function handles cross-validation internally
+        models, final_acc, cv_predictions, r2x_val = run_coupled_tpls_classification(
+            tensors=tensors, 
+            labels=y, 
+            rank=rank, 
+            return_proba=False
+        )
+        
+        # Save metrics for plotting
         accuracies.append(final_acc)
+        r2x_scores.append(r2x_val)
+        
         print(f"-> Rank {rank} Finished | CV Accuracy: {final_acc*100:.2f}% | R2X: {r2x_val:.4f}")
 
     # 3. COMBINE PLOTS INTO ONE PYTHON FILE (MULTI-PANEL FIGURE)
