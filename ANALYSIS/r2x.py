@@ -19,13 +19,13 @@ def main():
     # 1. LOAD AND PREPROCESS DATA
     print("Loading datasets...")
     X_rna = anndata.read_h5ad("/mnt/yang_lab/ar3023/ctf_melanoma/data/scrna_non_tumor.h5ad")
-    # Identify and subset the top 2000 highly variable RNA genes
-    sc.pp.highly_variable_genes(X_rna, n_top_genes=2000, flavor= "seurat_v3", inplace=True)
+    # Identify and subset the top 10000 highly variable RNA genes
+    sc.pp.highly_variable_genes(X_rna, n_top_genes=10000, flavor= "seurat_v3", inplace=True)
     X_rna_small = X_rna[:, X_rna.var["highly_variable"]].copy()
 
     X_atac = anndata.read_h5ad("/mnt/yang_lab/ar3023/ctf_melanoma/data/scatac_non_tumor_gene_activities.h5ad")
-    # Identify and subset the top 2000 highly variable ATAC features
-    sc.pp.highly_variable_genes(X_atac, n_top_genes=2000, flavor= "seurat_v3", inplace=True)
+    # Identify and subset the top 10000 highly variable ATAC features
+    sc.pp.highly_variable_genes(X_atac, n_top_genes=10000, flavor= "seurat_v3", inplace=True)
     X_atac_small = X_atac[:, X_atac.var["highly_variable"]].copy()
 
     rna_to_joint = {
