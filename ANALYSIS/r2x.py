@@ -1,6 +1,7 @@
 import os
 import sys
 import numpy as np
+import scanpy as sc
 import anndata
 import matplotlib.pyplot as plt
 from sklearn.model_selection import LeaveOneOut
@@ -18,10 +19,14 @@ def main():
     # 1. LOAD AND PREPROCESS DATA
     print("Loading datasets...")
     X_rna = anndata.read_h5ad("/mnt/yang_lab/ar3023/ctf_melanoma/data/scrna_non_tumor.h5ad")
-    X_rna_small = X_rna[:, :50].copy()
+    # Identify and subset the top 2000 highly variable RNA genes
+    sc.pp.highly_variable_genes(X_rna, n_top_genes=2000, flavor= "seurat_v3", inplace=True)
+    X_rna_small = X_rna[:, X_rna.var["highly_variable"]].copy()
 
     X_atac = anndata.read_h5ad("/mnt/yang_lab/ar3023/ctf_melanoma/data/scatac_non_tumor_gene_activities.h5ad")
-    X_atac_small = X_atac[:, :50].copy()
+    # Identify and subset the top 2000 highly variable ATAC features
+    sc.pp.highly_variable_genes(X_atac, n_top_genes=2000, flavor= "seurat_v3", inplace=True)
+    X_atac_small = X_atac[:, X_atac.var["highly_variable"]].copy()
 
     rna_to_joint = {
         'D19-11960': 'S1',  'D19-11966': 'S2',  'D19-11971': 'S3',
@@ -65,7 +70,7 @@ def main():
     tensors = [tensor_atac, tensor_rna]
 
     # 2. AUTOMATED LEAVE-ONE-OUT CROSS-VALIDATION
-    ranks = [1, 2, 3, 4, 5]
+    ranks = [1, 5, 10, 15, 20]
     accuracies = []
     r2x_scores = []
 
