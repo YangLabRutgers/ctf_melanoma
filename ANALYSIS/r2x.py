@@ -20,10 +20,10 @@ def evaluate_pipeline(X_rna_in, X_atac_in, num_genes, num_peaks, eval_rank=5):
     X_atac_temp = X_atac_in.copy()
     
     # Identify highly variable features dynamically
-    sc.pp.highly_variable_genes(X_rna_temp, n_top_genes=num_genes, flavor="seurat_v3", inplace=True)
+    sc.pp.highly_variable_genes(X_rna_temp, n_top_genes=num_genes, flavor="cell_ranger", inplace=True)
     X_rna_small = X_rna_temp[:, X_rna_temp.var["highly_variable"]].copy()
 
-    sc.pp.highly_variable_genes(X_atac_temp, n_top_genes=num_peaks, flavor="seurat_v3", inplace=True)
+    sc.pp.highly_variable_genes(X_atac_temp, n_top_genes=num_peaks, flavor="cell_ranger", inplace=True)
     X_atac_small = X_atac_temp[:, X_atac_temp.var["highly_variable"]].copy()
 
     # Shared Cell Types Intersection
@@ -135,44 +135,70 @@ def main():
     print(results_df.to_string())
     print("=====================================================================")
 
-    # Automatically Generate and Save Table Matrix Image
-    fig, ax = plt.subplots(figsize=(10, 3.5), dpi=300)
-    ax.axis('off')
+    # Convert accuracy fractions (e.g., 1.0, 0.83) into percentages (100.0, 83.0)
+    plot_df = results_df.astype(float) * 100
 
-    formatted_data = results_df.copy()
-    for col in formatted_data.columns:
-        formatted_data[col] = formatted_data[col].apply(lambda x: f"{x*100:.1f}%" if x in [0.666667, 0.583333, 0.416667] else f"{x*100:.0f}%")
+    # X-axis labels for the cell downsampling plot
+    columns_pct = ["100%", "75%", "50%", "25%", "5%"]
 
-    table = ax.table(
-        cellText=formatted_data.values,
-        rowLabels=formatted_data.index,
-        colLabels=formatted_data.columns,
-        cellLoc='center',
-        loc='center'
-    )
-    table.auto_set_font_size(False)
-    table.set_fontsize(10)
-    table.scale(1.2, 1.8)
-
-    for (row, col), cell in table.get_celld().items():
-        if row == 0:
-            cell.set_text_props(weight='bold', color='white')
-            cell.set_facecolor('#2c3e50')
-        elif col == -1:
-            cell.set_text_props(weight='bold')
-            cell.set_facecolor('#ecf0f1')
-        else:
-            val = formatted_data.iloc[row-1, col]
-            if any(drop in val for drop in ['41.6%', '58.3%', '66.7%']):
-                cell.set_facecolor('#fadbd8')
-            else:
-                cell.set_facecolor('#f8f9f9')
-
-    plt.title("Final Accuracy Matrix Across Stress Environments", fontsize=12, weight='bold', pad=20, color='#2c3e50')
-    plt.savefig("Plots/final_accuracy_matrix_table.png", bbox_inches='tight', dpi=300)
-    plt.close()
+    # Actual feature counts for the gene/peak reduction plot (calculated from 2000 top features)
+    feature_counts = [2000, 1500, 1000, 500, 100]
+    # ----------------------------------------------------
+    # PLOT 1: Cell Downsampling (Environments 1, 2, and 3)
+    # ----------------------------------------------------
+    plt.figure(figsize=(7, 5), dpi=300)
     
-    print("Pipeline complete! Visualizations saved to 'Plots/environment_stress_test_metrics.png' and 'Plots/final_accuracy_matrix_table.png'.")
+    cell_envs = [
+        "1. Remove Cells (Both RNA & ATAC)",
+        "2. Remove Cells (RNA Only)",
+        "3. Remove Cells (ATAC Only)"
+    ]
+    colors_cell = ['#1f77b4', '#ff7f0e', '#2ca02c']
+
+    # Plot each cell removal line
+    for env, color in zip(cell_envs, colors_cell):
+        plt.plot(columns_pct, plot_df.loc[env], marker='o', linewidth=2.5, label=env, color=color)
+
+    plt.title("Effect of Cell Downsampling on CV Accuracy", fontsize=12, weight='bold', pad=12)
+    plt.xlabel("Percentage of Retained Cells", fontsize=10, weight='bold')
+    plt.ylabel("Leave-One-Out CV Accuracy (%)", fontsize=10, weight='bold')
+    plt.ylim(-5, 105)
+    plt.grid(True, linestyle='--', alpha=0.5)
+    plt.legend(loc='lower left', fontsize=9)
+    plt.tight_layout()
+
+    # Save to dedicated cell plot file
+    plt.savefig("Plots/Cell_Downsampling_Plot.png", bbox_inches='tight', dpi=300)
+    plt.close()
+    # ----------------------------------------------------
+    # PLOT 2: Feature Reduction (Environments 4 and 5)
+    # ----------------------------------------------------
+    plt.figure(figsize=(7, 5), dpi=300)
+    
+    feature_envs = [
+        "4. Reduce Genes (RNA Only)",
+        "5. Reduce Peaks (ATAC Only)"
+    ]
+    colors_feature = ['#d62728', '#9467bd']
+
+    # Plot each feature reduction line against actual feature counts
+    for env, color in zip(feature_envs, colors_feature):
+        plt.plot(feature_counts, plot_df.loc[env], marker='s', linestyle='--', linewidth=2.5, label=env, color=color)
+
+    plt.title("Effect of Feature Reduction on CV Accuracy", fontsize=12, weight='bold', pad=12)
+    plt.xlabel("Number of Retained Features (Genes / Peaks)", fontsize=10, weight='bold')
+    plt.ylabel("Leave-One-Out CV Accuracy (%)", fontsize=10, weight='bold')
+    plt.ylim(-5, 105)
+    plt.gca().invert_xaxis()  # Inverts axis so it goes 2000 -> 100 (left to right)
+    plt.grid(True, linestyle='--', alpha=0.5)
+    plt.legend(loc='lower left', fontsize=9)
+    plt.tight_layout()
+
+    # Save to dedicated feature plot file
+    plt.savefig("Plots/Feature_Reduction_Plot.png", bbox_inches='tight', dpi=300)
+    plt.close()
+
+    print("Pipeline complete! Plots saved as 'Plots/Cell_Downsampling_Plot.png' and 'Plots/Feature_Reduction_Plot.png'.")
 
 if __name__ == "__main__":
     main()
