@@ -19,15 +19,31 @@ def evaluate_pipeline(X_rna_in, X_atac_in, num_genes, num_peaks, eval_rank=5):
     X_rna_temp = X_rna_in.copy()
     X_atac_temp = X_atac_in.copy()
     
-    # Identify highly variable features dynamically
-    sc.pp.highly_variable_genes(X_rna_temp, n_top_genes=num_genes, flavor="cell_ranger", inplace=True)
+    # Filter out 0-expression features created by subsampling to avoid duplicate bin crashes
+    sc.pp.filter_genes(X_rna_temp, min_cells=1)
+    sc.pp.filter_genes(X_atac_temp, min_cells=1)
+
+    # Filter out low-expression features (min 3 cells) created by heavy subsampling
+    sc.pp.filter_genes(X_rna_temp, min_cells=3)
+    sc.pp.filter_genes(X_atac_temp, min_cells=3)
+
+    # Identify highly variable features (seurat flavor avoids bin crashes)
+    try:
+        sc.pp.highly_variable_genes(X_rna_temp, n_top_genes=min(num_genes, X_rna_temp.n_vars), flavor="seurat", inplace=True)
+    except Exception:
+        sc.pp.highly_variable_genes(X_rna_temp, n_top_genes=min(num_genes, X_rna_temp.n_vars), flavor="cell_ranger", n_bins=5, inplace=True)
     X_rna_small = X_rna_temp[:, X_rna_temp.var["highly_variable"]].copy()
 
-    sc.pp.highly_variable_genes(X_atac_temp, n_top_genes=num_peaks, flavor="cell_ranger", inplace=True)
+    try:
+        sc.pp.highly_variable_genes(X_atac_temp, n_top_genes=min(num_peaks, X_atac_temp.n_vars), flavor="seurat", inplace=True)
+    except Exception:
+        sc.pp.highly_variable_genes(X_atac_temp, n_top_genes=min(num_peaks, X_atac_temp.n_vars), flavor="cell_ranger", n_bins=5, inplace=True)
     X_atac_small = X_atac_temp[:, X_atac_temp.var["highly_variable"]].copy()
 
     # Shared Cell Types Intersection
     shared_cell_types = set(X_atac_small.obs['reannotated_predicted_id']).intersection(set(X_rna_small.obs['cell_type']))
+    if not shared_cell_types:
+        return 0.0
     X_atac_small = X_atac_small[X_atac_small.obs['reannotated_predicted_id'].isin(shared_cell_types)].copy()
     X_rna_small = X_rna_small[X_rna_small.obs['cell_type'].isin(shared_cell_types)].copy()
 
@@ -38,19 +54,25 @@ def evaluate_pipeline(X_rna_in, X_atac_in, num_genes, num_peaks, eval_rank=5):
     # Tensor Conversion
     tensor_atac, _ = convert_pseudobulk_to_tensor(pseudobulk_df=pseudobulk_atac_df, outcome_col="lesion_response")
     tensor_rna, labels_rna = convert_pseudobulk_to_tensor(pseudobulk_df=pseudobulk_rna_df, outcome_col="lesion_response")
+    if 0 in tensor_atac.shape or 0 in tensor_rna.shape:
+        return 0.0
 
     y_raw = labels_rna["lesion_response"]
     y = np.array([0 if v == "R" else 1 for v in y_raw], dtype=int)
     tensors = [tensor_atac, tensor_rna]
 
     # Run standard model evaluation at locked rank 5
-    _, final_acc, _, _ = run_coupled_tpls_classification(
+    try:
+        _, final_acc, _, _ = run_coupled_tpls_classification(
         tensors=tensors, 
         labels=y, 
         rank=eval_rank, 
         return_proba=False
     )
-    return final_acc
+        return final_acc
+    except Exception as e:
+        print(f"Warning: Classification failed for this parameter set ({e}). Defaulting accuracy to 0.0")
+    return 0.0
 
 def main():
     print("--- Starting Automated Multi-Environment Stress-Testing Pipeline ---")
@@ -89,14 +111,15 @@ def main():
 
 
     # Settings for Grid Search
-    fractions = [1.0, 0.75, 0.50, 0.25, 0.05]
-    columns = ["100%", "75%", "50%", "25%", "5%"]
+    fractions = [0.25, 0.05]
+    columns = ["25%", "5%"]
     environments = [
         "1. Remove Cells (Both RNA & ATAC)",
         "2. Remove Cells (RNA Only)",
         "3. Remove Cells (ATAC Only)",
         "4. Reduce Genes (RNA Only)",
-        "5. Reduce Peaks (ATAC Only)"
+        "5. Reduce Peaks (ATAC Only)",
+        "6. Reduce Features (Both RNA & ATAC)"
     ]
 
     # Initialize Tracking Dataframe
@@ -130,6 +153,9 @@ def main():
         current_peaks = int(base_peaks * frac) if int(base_peaks * frac) >= 10 else 10
         results_df.loc["5. Reduce Peaks (ATAC Only)", col_name] = evaluate_pipeline(X_rna_base, X_atac_base, base_genes, current_peaks)
 
+        # --- ENV 6: Scale BOTH Features Simultaneously ---
+        results_df.loc["6. Reduce Features (Both RNA & ATAC)", col_name] = evaluate_pipeline(X_rna_base, X_atac_base, current_genes, current_peaks)
+
     # Print Final Summary Matrix to Terminal
     print("\n======================= FINAL ACCURACY MATRIX =======================")
     print(results_df.to_string())
@@ -139,10 +165,10 @@ def main():
     plot_df = results_df.astype(float) * 100
 
     # X-axis labels for the cell downsampling plot
-    columns_pct = ["100%", "75%", "50%", "25%", "5%"]
+    columns_pct = ["25%", "5%"]
 
     # Actual feature counts for the gene/peak reduction plot (calculated from 2000 top features)
-    feature_counts = [2000, 1500, 1000, 500, 100]
+    feature_counts = [500, 100]
     # ----------------------------------------------------
     # PLOT 1: Cell Downsampling (Environments 1, 2, and 3)
     # ----------------------------------------------------
@@ -177,9 +203,10 @@ def main():
     
     feature_envs = [
         "4. Reduce Genes (RNA Only)",
-        "5. Reduce Peaks (ATAC Only)"
+        "5. Reduce Peaks (ATAC Only)",
+        "6. Reduce Features (Both RNA & ATAC)"
     ]
-    colors_feature = ['#d62728', '#9467bd']
+    colors_feature = ['#d62728', '#9467bd', '#2ca02c']
 
     # Plot each feature reduction line against actual feature counts
     for env, color in zip(feature_envs, colors_feature):
