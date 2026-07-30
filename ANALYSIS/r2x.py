@@ -1,5 +1,6 @@
 import os
 import sys
+import pandas as pd
 import numpy as np
 import scanpy as sc
 import anndata
@@ -13,20 +14,73 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from data_import import convert_anndata_to_pseudobulk, convert_pseudobulk_to_tensor
 from .predict import run_coupled_tpls_classification
 
-def main():
-    print("--- Starting Clean Multi-Rank Evaluation Pipeline ---")
+def evaluate_pipeline(X_rna_in, X_atac_in, num_genes, num_peaks, eval_rank=5):
+    """Helper function to run the pipeline steps and return cross-validation accuracy."""
+    X_rna_temp = X_rna_in.copy()
+    X_atac_temp = X_atac_in.copy()
     
-    # 1. LOAD AND PREPROCESS DATA
-    print("Loading datasets...")
-    X_rna = anndata.read_h5ad("/mnt/yang_lab/ar3023/ctf_melanoma/data/scrna_non_tumor.h5ad")
-    # Identify and subset the top 10000 highly variable RNA genes
-    sc.pp.highly_variable_genes(X_rna, n_top_genes=10000, flavor= "seurat_v3", inplace=True)
-    X_rna_small = X_rna[:, X_rna.var["highly_variable"]].copy()
+    # Filter out 0-expression features created by subsampling to avoid duplicate bin crashes
+    sc.pp.filter_genes(X_rna_temp, min_cells=1)
+    sc.pp.filter_genes(X_atac_temp, min_cells=1)
 
-    X_atac = anndata.read_h5ad("/mnt/yang_lab/ar3023/ctf_melanoma/data/scatac_non_tumor_gene_activities.h5ad")
-    # Identify and subset the top 10000 highly variable ATAC features
-    sc.pp.highly_variable_genes(X_atac, n_top_genes=10000, flavor= "seurat_v3", inplace=True)
-    X_atac_small = X_atac[:, X_atac.var["highly_variable"]].copy()
+    # Filter out low-expression features (min 3 cells) created by heavy subsampling
+    sc.pp.filter_genes(X_rna_temp, min_cells=3)
+    sc.pp.filter_genes(X_atac_temp, min_cells=3)
+
+    # Identify highly variable features (seurat flavor avoids bin crashes)
+    try:
+        sc.pp.highly_variable_genes(X_rna_temp, n_top_genes=min(num_genes, X_rna_temp.n_vars), flavor="seurat", inplace=True)
+    except Exception:
+        sc.pp.highly_variable_genes(X_rna_temp, n_top_genes=min(num_genes, X_rna_temp.n_vars), flavor="cell_ranger", n_bins=5, inplace=True)
+    X_rna_small = X_rna_temp[:, X_rna_temp.var["highly_variable"]].copy()
+
+    try:
+        sc.pp.highly_variable_genes(X_atac_temp, n_top_genes=min(num_peaks, X_atac_temp.n_vars), flavor="seurat", inplace=True)
+    except Exception:
+        sc.pp.highly_variable_genes(X_atac_temp, n_top_genes=min(num_peaks, X_atac_temp.n_vars), flavor="cell_ranger", n_bins=5, inplace=True)
+    X_atac_small = X_atac_temp[:, X_atac_temp.var["highly_variable"]].copy()
+
+    # Shared Cell Types Intersection
+    shared_cell_types = set(X_atac_small.obs['reannotated_predicted_id']).intersection(set(X_rna_small.obs['cell_type']))
+    if not shared_cell_types:
+        return 0.0
+    X_atac_small = X_atac_small[X_atac_small.obs['reannotated_predicted_id'].isin(shared_cell_types)].copy()
+    X_rna_small = X_rna_small[X_rna_small.obs['cell_type'].isin(shared_cell_types)].copy()
+
+    # Pseudobulk Conversion
+    pseudobulk_atac_df = convert_anndata_to_pseudobulk(adata=X_atac_small, sample_col="joint_sample_id", cell_type_col="reannotated_predicted_id", outcome_col="lesion_response")
+    pseudobulk_rna_df = convert_anndata_to_pseudobulk(adata=X_rna_small, sample_col="joint_sample_id", cell_type_col="cell_type", outcome_col="lesion_response")
+
+    # Tensor Conversion
+    tensor_atac, _ = convert_pseudobulk_to_tensor(pseudobulk_df=pseudobulk_atac_df, outcome_col="lesion_response")
+    tensor_rna, labels_rna = convert_pseudobulk_to_tensor(pseudobulk_df=pseudobulk_rna_df, outcome_col="lesion_response")
+    if 0 in tensor_atac.shape or 0 in tensor_rna.shape:
+        return 0.0
+
+    y_raw = labels_rna["lesion_response"]
+    y = np.array([0 if v == "R" else 1 for v in y_raw], dtype=int)
+    tensors = [tensor_atac, tensor_rna]
+
+    # Run standard model evaluation at locked rank 5
+    try:
+        _, final_acc, _, _ = run_coupled_tpls_classification(
+        tensors=tensors, 
+        labels=y, 
+        rank=eval_rank, 
+        return_proba=False
+    )
+        return final_acc
+    except Exception as e:
+        print(f"Warning: Classification failed for this parameter set ({e}). Defaulting accuracy to 0.0")
+    return 0.0
+
+def main():
+    print("--- Starting Automated Multi-Environment Stress-Testing Pipeline ---")
+    
+    # LOAD BASE DATASETS
+    print("Loading raw base datasets...")
+    X_rna_base = anndata.read_h5ad("/mnt/yang_lab/ar3023/ctf_melanoma/data/scrna_non_tumor.h5ad")
+    X_atac_base = anndata.read_h5ad("/mnt/yang_lab/ar3023/ctf_melanoma/data/scatac_non_tumor_gene_activities.h5ad")
 
     rna_to_joint = {
         'D19-11960': 'S1',  'D19-11966': 'S2',  'D19-11971': 'S3',
@@ -45,81 +99,133 @@ def main():
         'S7': 'NR', 'S8': 'NR', 'S9': 'R', 'S10': 'NR', 'S11': 'R', 'S12': 'R'
     }
 
-    X_rna_small.obs['joint_sample_id'] = X_rna_small.obs['sample_ID_long'].map(rna_to_joint).astype(str)
-    X_rna_small.obs['lesion_response'] = X_rna_small.obs['joint_sample_id'].map(sample_responses)
+    X_rna_base.obs['joint_sample_id'] = X_rna_base.obs['sample_ID_long'].map(rna_to_joint).astype(str)
+    X_rna_base.obs['lesion_response'] = X_rna_base.obs['joint_sample_id'].map(sample_responses)
 
-    X_atac_small.obs['joint_sample_id'] = X_atac_small.obs['orig.ident'].map(atac_to_joint).astype(str)
-    X_atac_small.obs['lesion_response'] = X_atac_small.obs['joint_sample_id'].map(sample_responses)
+    X_atac_base.obs['joint_sample_id'] = X_atac_base.obs['orig.ident'].map(atac_to_joint).astype(str)
+    X_atac_base.obs['lesion_response'] = X_atac_base.obs['joint_sample_id'].map(sample_responses)
 
     valid_samples = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S11', 'S12']
-    X_rna_small = X_rna_small[X_rna_small.obs['joint_sample_id'].isin(valid_samples)].copy()
-    X_atac_small = X_atac_small[X_atac_small.obs['joint_sample_id'].isin(valid_samples)].copy()
+    X_rna_base = X_rna_base[X_rna_base.obs['joint_sample_id'].isin(valid_samples)].copy()
+    X_atac_base = X_atac_base[X_atac_base.obs['joint_sample_id'].isin(valid_samples)].copy()
 
-    shared_cell_types = set(X_atac_small.obs['reannotated_predicted_id']).intersection(set(X_rna_small.obs['cell_type']))
-    X_atac_small = X_atac_small[X_atac_small.obs['reannotated_predicted_id'].isin(shared_cell_types)].copy()
-    X_rna_small = X_rna_small[X_rna_small.obs['cell_type'].isin(shared_cell_types)].copy()
 
-    pseudobulk_atac_df = convert_anndata_to_pseudobulk(adata=X_atac_small, sample_col="joint_sample_id", cell_type_col="reannotated_predicted_id", outcome_col="lesion_response")
-    pseudobulk_rna_df = convert_anndata_to_pseudobulk(adata=X_rna_small, sample_col="joint_sample_id", cell_type_col="cell_type", outcome_col="lesion_response")
+    # Settings for Grid Search
+    fractions = [0.25, 0.05]
+    columns = ["25%", "5%"]
+    environments = [
+        "1. Remove Cells (Both RNA & ATAC)",
+        "2. Remove Cells (RNA Only)",
+        "3. Remove Cells (ATAC Only)",
+        "4. Reduce Genes (RNA Only)",
+        "5. Reduce Peaks (ATAC Only)",
+        "6. Reduce Features (Both RNA & ATAC)"
+    ]
 
-    tensor_atac, _ = convert_pseudobulk_to_tensor(pseudobulk_df=pseudobulk_atac_df, outcome_col="lesion_response")
-    tensor_rna, labels_rna = convert_pseudobulk_to_tensor(pseudobulk_df=pseudobulk_rna_df, outcome_col="lesion_response")
+    # Initialize Tracking Dataframe
+    results_df = pd.DataFrame(index=environments, columns=columns)
+    
+    # Baseline Sweet-spot parameters (2,000 features)
+    base_genes = 2000
+    base_peaks = 2000
 
-    y_raw = labels_rna["lesion_response"]
-    y = np.array([0 if v == "R" else 1 for v in y_raw], dtype=int)
-    tensors = [tensor_atac, tensor_rna]
-
-    # 2. AUTOMATED LEAVE-ONE-OUT CROSS-VALIDATION
-    ranks = [1, 5, 10, 15, 20]
-    accuracies = []
-    r2x_scores = []
-
-    for rank in ranks:
-        print(f"\n--- Running Cross-Validation Evaluation (Rank {rank}) ---")
+    for frac, col_name in zip(fractions, columns):
+        print(f"\n--- Running Sweep for Data Scale Step: {col_name} ---")
         
-        # Call the classification function directly on the whole dataset
-        # The function handles cross-validation internally
-        models, final_acc, cv_predictions, r2x_val = run_coupled_tpls_classification(
-            tensors=tensors, 
-            labels=y, 
-            rank=rank, 
-            return_proba=False
-        )
-        
-        # Save metrics for plotting
-        accuracies.append(final_acc)
-        r2x_scores.append(r2x_val)
-        
-        print(f"-> Rank {rank} Finished | CV Accuracy: {final_acc*100:.2f}% | R2X: {r2x_val:.4f}")
+        # --- ENV 1: Downsample Cells for Both Modalities ---
+        rna_env1 = sc.pp.subsample(X_rna_base, fraction=frac, copy=True) if frac < 1.0 else X_rna_base.copy()
+        atac_env1 = sc.pp.subsample(X_atac_base, fraction=frac, copy=True) if frac < 1.0 else X_atac_base.copy()
+        results_df.loc["1. Remove Cells (Both RNA & ATAC)", col_name] = evaluate_pipeline(rna_env1, atac_env1, base_genes, base_peaks)
 
-    # 3. COMBINE PLOTS INTO ONE PYTHON FILE (MULTI-PANEL FIGURE)
-    print("\n--- Saving Combined Performance Plots ---")
-    os.makedirs("Plots", exist_ok=True)
+        # --- ENV 2: Downsample Cells for RNA Only ---
+        rna_env2 = sc.pp.subsample(X_rna_base, fraction=frac, copy=True) if frac < 1.0 else X_rna_base.copy()
+        results_df.loc["2. Remove Cells (RNA Only)", col_name] = evaluate_pipeline(rna_env2, X_atac_base, base_genes, base_peaks)
 
-    # Creating a single 1 row, 2 column figure layout
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+        # --- ENV 3: Downsample Cells for ATAC Only ---
+        atac_env3 = sc.pp.subsample(X_atac_base, fraction=frac, copy=True) if frac < 1.0 else X_atac_base.copy()
+        results_df.loc["3. Remove Cells (ATAC Only)", col_name] = evaluate_pipeline(X_rna_base, atac_env3, base_genes, base_peaks)
 
-    # Left Panel: Accuracy vs Rank
-    ax1.plot(ranks, accuracies, marker='o', color='crimson', linewidth=2)
-    ax1.set_title("Cross-Validation Accuracy vs. Model Rank")
-    ax1.set_xlabel("ctPLS Rank")
-    ax1.set_ylabel("Accuracy Score")
-    ax1.set_xticks(ranks)
-    ax1.grid(True, linestyle='--', alpha=0.6)
+        # --- ENV 4: Scale RNA Features Only ---
+        current_genes = int(base_genes * frac) if int(base_genes * frac) >= 10 else 10
+        results_df.loc["4. Reduce Genes (RNA Only)", col_name] = evaluate_pipeline(X_rna_base, X_atac_base, current_genes, base_peaks)
 
-    # Right Panel: R2X Variance Explained vs Rank
-    ax2.plot(ranks, r2x_scores, marker='s', color='navy', linewidth=2)
-    ax2.set_title("Variance Explained (R2X) vs. Model Rank")
-    ax2.set_xlabel("ctPLS Rank")
-    ax2.set_ylabel("R2X Metric Value")
-    ax2.set_xticks(ranks)
-    ax2.grid(True, linestyle='--', alpha=0.6)
+        # --- ENV 5: Scale ATAC Features Only ---
+        current_peaks = int(base_peaks * frac) if int(base_peaks * frac) >= 10 else 10
+        results_df.loc["5. Reduce Peaks (ATAC Only)", col_name] = evaluate_pipeline(X_rna_base, X_atac_base, base_genes, current_peaks)
 
+        # --- ENV 6: Scale BOTH Features Simultaneously ---
+        results_df.loc["6. Reduce Features (Both RNA & ATAC)", col_name] = evaluate_pipeline(X_rna_base, X_atac_base, current_genes, current_peaks)
+
+    # Print Final Summary Matrix to Terminal
+    print("\n======================= FINAL ACCURACY MATRIX =======================")
+    print(results_df.to_string())
+    print("=====================================================================")
+
+    # Convert accuracy fractions (e.g., 1.0, 0.83) into percentages (100.0, 83.0)
+    plot_df = results_df.astype(float) * 100
+
+    # X-axis labels for the cell downsampling plot
+    columns_pct = ["25%", "5%"]
+
+    # Actual feature counts for the gene/peak reduction plot (calculated from 2000 top features)
+    feature_counts = [500, 100]
+    # ----------------------------------------------------
+    # PLOT 1: Cell Downsampling (Environments 1, 2, and 3)
+    # ----------------------------------------------------
+    plt.figure(figsize=(7, 5), dpi=300)
+    
+    cell_envs = [
+        "1. Remove Cells (Both RNA & ATAC)",
+        "2. Remove Cells (RNA Only)",
+        "3. Remove Cells (ATAC Only)"
+    ]
+    colors_cell = ['#1f77b4', '#ff7f0e', '#2ca02c']
+
+    # Plot each cell removal line
+    for env, color in zip(cell_envs, colors_cell):
+        plt.plot(columns_pct, plot_df.loc[env], marker='o', linewidth=2.5, label=env, color=color)
+
+    plt.title("Effect of Cell Downsampling on CV Accuracy", fontsize=12, weight='bold', pad=12)
+    plt.xlabel("Percentage of Retained Cells", fontsize=10, weight='bold')
+    plt.ylabel("Leave-One-Out CV Accuracy (%)", fontsize=10, weight='bold')
+    plt.ylim(-5, 105)
+    plt.grid(True, linestyle='--', alpha=0.5)
+    plt.legend(loc='lower left', fontsize=9)
     plt.tight_layout()
-    plt.savefig("Plots/model_evaluation_metrics.png", dpi=300)
+
+    # Save to dedicated cell plot file
+    plt.savefig("Plots/Cell_Downsampling_Plot.png", bbox_inches='tight', dpi=300)
+    plt.close()
+    # ----------------------------------------------------
+    # PLOT 2: Feature Reduction (Environments 4 and 5)
+    # ----------------------------------------------------
+    plt.figure(figsize=(7, 5), dpi=300)
+    
+    feature_envs = [
+        "4. Reduce Genes (RNA Only)",
+        "5. Reduce Peaks (ATAC Only)",
+        "6. Reduce Features (Both RNA & ATAC)"
+    ]
+    colors_feature = ['#d62728', '#9467bd', '#2ca02c']
+
+    # Plot each feature reduction line against actual feature counts
+    for env, color in zip(feature_envs, colors_feature):
+        plt.plot(feature_counts, plot_df.loc[env], marker='s', linestyle='--', linewidth=2.5, label=env, color=color)
+
+    plt.title("Effect of Feature Reduction on CV Accuracy", fontsize=12, weight='bold', pad=12)
+    plt.xlabel("Number of Retained Features (Genes / Peaks)", fontsize=10, weight='bold')
+    plt.ylabel("Leave-One-Out CV Accuracy (%)", fontsize=10, weight='bold')
+    plt.ylim(-5, 105)
+    plt.gca().invert_xaxis()  # Inverts axis so it goes 2000 -> 100 (left to right)
+    plt.grid(True, linestyle='--', alpha=0.5)
+    plt.legend(loc='lower left', fontsize=9)
+    plt.tight_layout()
+
+    # Save to dedicated feature plot file
+    plt.savefig("Plots/Feature_Reduction_Plot.png", bbox_inches='tight', dpi=300)
     plt.close()
 
-    print("Pipeline complete! Unified visualization saved to 'Plots/model_evaluation_metrics.png'.")
+    print("Pipeline complete! Plots saved as 'Plots/Cell_Downsampling_Plot.png' and 'Plots/Feature_Reduction_Plot.png'.")
 
 if __name__ == "__main__":
     main()
