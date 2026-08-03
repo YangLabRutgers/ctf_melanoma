@@ -7,6 +7,7 @@ import anndata
 import matplotlib.pyplot as plt
 from sklearn.model_selection import LeaveOneOut
 from sklearn.metrics import accuracy_score
+from sklearn.pipeline import Pipeline
 
 # Ensure Python can see modules in the root directory
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -19,11 +20,7 @@ def evaluate_pipeline(X_rna_in, X_atac_in, num_genes, num_peaks, eval_rank=5):
     X_rna_temp = X_rna_in.copy()
     X_atac_temp = X_atac_in.copy()
     
-    # Filter out 0-expression features created by subsampling to avoid duplicate bin crashes
-    sc.pp.filter_genes(X_rna_temp, min_cells=1)
-    sc.pp.filter_genes(X_atac_temp, min_cells=1)
-
-    # Filter out low-expression features (min 3 cells) created by heavy subsampling
+    # Filter out low-expression features (<3 cells)
     sc.pp.filter_genes(X_rna_temp, min_cells=3)
     sc.pp.filter_genes(X_atac_temp, min_cells=3)
 
@@ -111,50 +108,33 @@ def main():
 
 
     # Settings for Grid Search
-    fractions = [0.25, 0.05]
-    columns = ["25%", "5%"]
-    environments = [
-        "1. Remove Cells (Both RNA & ATAC)",
-        "2. Remove Cells (RNA Only)",
-        "3. Remove Cells (ATAC Only)",
+    columns = [50000, 10000, 2000, 1000]
+    feature_counts = [50000, 10000, 2000, 1000]
+
+    feature_environments = [
         "4. Reduce Genes (RNA Only)",
         "5. Reduce Peaks (ATAC Only)",
         "6. Reduce Features (Both RNA & ATAC)"
     ]
 
     # Initialize Tracking Dataframe
-    results_df = pd.DataFrame(index=environments, columns=columns)
+    results_df = pd.DataFrame(index=feature_environments, columns=columns)
     
-    # Baseline Sweet-spot parameters (2,000 features)
-    base_genes = 2000
-    base_peaks = 2000
+    # Baseline fallback parameters for unreduced modality 
+    base_features = 2000
 
-    for frac, col_name in zip(fractions, columns):
-        print(f"\n--- Running Sweep for Data Scale Step: {col_name} ---")
-        
-        # --- ENV 1: Downsample Cells for Both Modalities ---
-        rna_env1 = sc.pp.subsample(X_rna_base, fraction=frac, copy=True) if frac < 1.0 else X_rna_base.copy()
-        atac_env1 = sc.pp.subsample(X_atac_base, fraction=frac, copy=True) if frac < 1.0 else X_atac_base.copy()
-        results_df.loc["1. Remove Cells (Both RNA & ATAC)", col_name] = evaluate_pipeline(rna_env1, atac_env1, base_genes, base_peaks)
 
-        # --- ENV 2: Downsample Cells for RNA Only ---
-        rna_env2 = sc.pp.subsample(X_rna_base, fraction=frac, copy=True) if frac < 1.0 else X_rna_base.copy()
-        results_df.loc["2. Remove Cells (RNA Only)", col_name] = evaluate_pipeline(rna_env2, X_atac_base, base_genes, base_peaks)
-
-        # --- ENV 3: Downsample Cells for ATAC Only ---
-        atac_env3 = sc.pp.subsample(X_atac_base, fraction=frac, copy=True) if frac < 1.0 else X_atac_base.copy()
-        results_df.loc["3. Remove Cells (ATAC Only)", col_name] = evaluate_pipeline(X_rna_base, atac_env3, base_genes, base_peaks)
+    for feat_num, col_name in zip(feature_counts, columns):
+        print(f"\n--- Running Sweep for Data Scale Step: {col_name} features ---")
 
         # --- ENV 4: Scale RNA Features Only ---
-        current_genes = int(base_genes * frac) if int(base_genes * frac) >= 10 else 10
-        results_df.loc["4. Reduce Genes (RNA Only)", col_name] = evaluate_pipeline(X_rna_base, X_atac_base, current_genes, base_peaks)
+        results_df.loc["4. Reduce Genes (RNA Only)", col_name] = evaluate_pipeline(X_rna_base, X_atac_base, num_genes=feat_num, num_peaks=base_features)
 
         # --- ENV 5: Scale ATAC Features Only ---
-        current_peaks = int(base_peaks * frac) if int(base_peaks * frac) >= 10 else 10
-        results_df.loc["5. Reduce Peaks (ATAC Only)", col_name] = evaluate_pipeline(X_rna_base, X_atac_base, base_genes, current_peaks)
+        results_df.loc["5. Reduce Peaks (ATAC Only)", col_name] = evaluate_pipeline(X_rna_base, X_atac_base, num_genes=base_features, num_peaks=feat_num)
 
         # --- ENV 6: Scale BOTH Features Simultaneously ---
-        results_df.loc["6. Reduce Features (Both RNA & ATAC)", col_name] = evaluate_pipeline(X_rna_base, X_atac_base, current_genes, current_peaks)
+        results_df.loc["6. Reduce Features (Both RNA & ATAC)", col_name] = evaluate_pipeline(X_rna_base, X_atac_base, num_genes=feat_num, num_peaks=feat_num)
 
     # Print Final Summary Matrix to Terminal
     print("\n======================= FINAL ACCURACY MATRIX =======================")
@@ -164,68 +144,32 @@ def main():
     # Convert accuracy fractions (e.g., 1.0, 0.83) into percentages (100.0, 83.0)
     plot_df = results_df.astype(float) * 100
 
-    # X-axis labels for the cell downsampling plot
-    columns_pct = ["25%", "5%"]
-
-    # Actual feature counts for the gene/peak reduction plot (calculated from 2000 top features)
-    feature_counts = [500, 100]
     # ----------------------------------------------------
-    # PLOT 1: Cell Downsampling (Environments 1, 2, and 3)
+    # PLOT: Feature Reduction Across Explicit Counts 
     # ----------------------------------------------------
     plt.figure(figsize=(7, 5), dpi=300)
     
-    cell_envs = [
-        "1. Remove Cells (Both RNA & ATAC)",
-        "2. Remove Cells (RNA Only)",
-        "3. Remove Cells (ATAC Only)"
-    ]
-    colors_cell = ['#1f77b4', '#ff7f0e', '#2ca02c']
+    colors_feature = ['#d62728', '#9467bd', '#2ca02c']
 
-    # Plot each cell removal line
-    for env, color in zip(cell_envs, colors_cell):
-        plt.plot(columns_pct, plot_df.loc[env], marker='o', linewidth=2.5, label=env, color=color)
+    # Plot each feature reduction line
+    for env, color in zip(feature_environments, colors_feature):
+        plt.plot(feature_counts, plot_df.loc[env], marker='s', linestyle='--', linewidth=2.5, label=env, color=color)
 
-    plt.title("Effect of Cell Downsampling on CV Accuracy", fontsize=12, weight='bold', pad=12)
-    plt.xlabel("Percentage of Retained Cells", fontsize=10, weight='bold')
+    plt.title("Effect of Feature Reduction on CV Accuracy", fontsize=12, weight='bold', pad=12)
+    plt.xlabel("Number of Retained Features", fontsize=10, weight='bold')
     plt.ylabel("Leave-One-Out CV Accuracy (%)", fontsize=10, weight='bold')
     plt.ylim(-5, 105)
+    plt.xscale('log') #Uses logarithmic scale for x-axis to better visualize the range of feature counts
+    plt.gca().invert_xaxis()  # Inverts axis so it goes 50000 -> 1000 (left to right)
     plt.grid(True, linestyle='--', alpha=0.5)
     plt.legend(loc='lower left', fontsize=9)
     plt.tight_layout()
 
     # Save to dedicated cell plot file
-    plt.savefig("Plots/Cell_Downsampling_Plot.png", bbox_inches='tight', dpi=300)
-    plt.close()
-    # ----------------------------------------------------
-    # PLOT 2: Feature Reduction (Environments 4 and 5)
-    # ----------------------------------------------------
-    plt.figure(figsize=(7, 5), dpi=300)
-    
-    feature_envs = [
-        "4. Reduce Genes (RNA Only)",
-        "5. Reduce Peaks (ATAC Only)",
-        "6. Reduce Features (Both RNA & ATAC)"
-    ]
-    colors_feature = ['#d62728', '#9467bd', '#2ca02c']
-
-    # Plot each feature reduction line against actual feature counts
-    for env, color in zip(feature_envs, colors_feature):
-        plt.plot(feature_counts, plot_df.loc[env], marker='s', linestyle='--', linewidth=2.5, label=env, color=color)
-
-    plt.title("Effect of Feature Reduction on CV Accuracy", fontsize=12, weight='bold', pad=12)
-    plt.xlabel("Number of Retained Features (Genes / Peaks)", fontsize=10, weight='bold')
-    plt.ylabel("Leave-One-Out CV Accuracy (%)", fontsize=10, weight='bold')
-    plt.ylim(-5, 105)
-    plt.gca().invert_xaxis()  # Inverts axis so it goes 2000 -> 100 (left to right)
-    plt.grid(True, linestyle='--', alpha=0.5)
-    plt.legend(loc='lower left', fontsize=9)
-    plt.tight_layout()
-
-    # Save to dedicated feature plot file
     plt.savefig("Plots/Feature_Reduction_Plot.png", bbox_inches='tight', dpi=300)
     plt.close()
 
-    print("Pipeline complete! Plots saved as 'Plots/Cell_Downsampling_Plot.png' and 'Plots/Feature_Reduction_Plot.png'.")
+    print ("Pipeline Complete! Saved 'Plots/Feature_Reduction_Plot.png'.")
 
 if __name__ == "__main__":
     main()
